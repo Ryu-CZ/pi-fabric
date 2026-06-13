@@ -1,0 +1,27 @@
+{
+  "name": "pi-fabric",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Pi extension adapter for Hermes/Icarus Fabric markdown corpus",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test dist/tests/*.test.js"
+  },
+  "dependencies": {
+    "typebox": "^1.2.9"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.79.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.8.0"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
