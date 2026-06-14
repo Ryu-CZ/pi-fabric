@@ -1,235 +1,176 @@
 # pi-fabric Implementation Plan
 
-This plan implements `DESIGN.md` as a Pi adapter extension for the existing Hermes/Icarus Fabric markdown corpus. Phase 1 is compatibility-first: no Qdrant, Redis, Hermes `state.db`, telemetry, fine-tuning, or model-switching writes.
+Single tracking document for `pi-fabric`. Stable design decisions live in `DESIGN.md`; user-facing usage lives in `README.md`.
 
-## Success criteria from DESIGN.md
+## Product Role
 
-- Build a standalone TypeScript Pi extension named `pi-fabric`.
-- Resolve `$FABRIC_DIR` as: env `FABRIC_DIR` → existing `~/fabric` → `~/.pi/fabric`.
-- Read/write Icarus-compatible markdown entries with YAML frontmatter, 8-hex `id`, independent 4-hex filename suffix, atomic temp-file rename, and shared `cold/` support.
-- Implement phase-1 tools: `fabric_write`, `fabric_recall`, `fabric_search`, `fabric_pending`, `fabric_curate`, `fabric_brief`, `fabric_init_obsidian`.
-- Preserve Hermes field names, tool parameter names, validation rules, pending-work semantics, and `agent:id` linking semantics.
-- Verify/use actual Pi extension API hooks; implement only available lifecycle hooks and fail open.
-- Provide tests covering all DESIGN.md compatibility-test items.
+`pi-fabric` is the Pi adapter for the existing Hermes/Icarus Fabric markdown corpus. It owns Fabric-compatible markdown storage, Fabric tools, Fabric recall/scoring, pending/review/brief workflows, and optional Fabric auto-capture.
 
-## Reference facts already verified
+`pi-memory-os` depends on `pi-fabric` for structured Fabric context. `pi-memory-os` must call `pi-fabric` APIs instead of duplicating Fabric markdown readers, writers, schemas, or tools.
 
-- Icarus registers 16 tools and 4 hooks in `/home/tom/tmp/memory-os/icarus/__init__.py`.
-- Icarus schemas use `fabric_recall.query`, `fabric_recall.max_results`, optional `agent`, optional `project`, and `fabric_write` comma-string `tags` / `artifact_paths` in `/home/tom/tmp/memory-os/icarus/schemas.py`.
-- Icarus core store behavior is in `/home/tom/tmp/memory-os/icarus/state.py`:
-  - `write_entry()` uses frontmatter `id = secrets.token_hex(4)` and filename suffix `secrets.token_hex(2)`.
-  - filenames are `<agent>-<type>-<slug>-<suffix>.md`.
-  - atomic write is `.tmp` then rename.
-  - `has_entry_ref()` searches both root and `cold/` by frontmatter `agent` + `id`.
-  - `curate_entry()` updates by frontmatter `id`.
-  - `read_pending()` groups open assigned work, reviews of current agent's work, and customer-scoped open tickets.
-  - `search_entries()` scans root and `cold/`.
-- Pi extension hooks are available per Pi docs:
-  - `session_start` for status/brief setup.
-  - `before_agent_start` can inject a persistent message and/or alter system prompt.
-  - `agent_end` exposes `event.messages` for optional auto-capture.
-- Pi tool registration uses `pi.registerTool({ name, description, parameters: Type.Object(...), execute(...) })` and returns `{ content: [{ type: "text", text }], details }`.
+## Current Priority
 
-## Project scaffold
+**Task:** phase-1 pi-fabric implementation is complete; keep compatibility healthy while downstream `pi-memory-os` uses the stable API.
 
-Create:
+Motivation:
 
-```txt
-package.json
-README.md
-tsconfig.json
-src/
-  index.ts
-  config.ts
-  types.ts
-  yaml.ts
-  fabric-store.ts
-  scoring.ts
-  hooks.ts
-tests/
-  fabric-store.test.ts
-  scoring.test.ts
-```
+- `pi-memory-os` should remain a glue layer to the existing local Memory OS brain, not a reimplementation of Fabric.
+- Fabric markdown storage, schema, tools, pending/review workflows, and brief/recall behavior belong in `pi-fabric`.
+- `pi-memory-os` needs Fabric context for ambient Memory OS injection, but it should consume that context by calling `pi-fabric` APIs.
+- Importing `pi-fabric/dist/src/...` is brittle because it depends on build layout instead of a supported package contract.
+- A stable public API is the enabler for the next `pi-memory-os` task: session-start / first-turn Fabric operational context equivalent to Icarus brief/pending/recent state.
 
-Package conventions should mirror `pi-memory-os`: ESM, `@earendil-works/pi-coding-agent`, `@sinclair/typebox`, TypeScript 5.8+, Node 22+ built-ins only. Use `pi.extensions: ["./src/index.ts"]`.
+Why now: `pi-memory-os` now consumes `pi-fabric` through the stable package-level API for config/store/recall/brief/pending/recent access, including session-start Fabric operational context.
 
-## Implementation steps
+Status:
 
-### 1. Configuration (`src/config.ts`)
+- [x] Phase-1 Fabric store/tools/hooks implementation exists.
+- [x] Icarus-compatible markdown storage and frontmatter behavior implemented.
+- [x] Seven phase-1 tools exist: `fabric_write`, `fabric_recall`, `fabric_search`, `fabric_pending`, `fabric_curate`, `fabric_brief`, `fabric_init_obsidian`.
+- [x] Tests exist for config, store behavior, and scoring.
+- [x] Add stable public exports for programmatic consumers.
+- [x] Add a consumer-style import test for the public API.
+- [x] Update `pi-memory-os` to stop importing `pi-fabric/dist/src/...` (`src/retrieval/sources.ts`, `tests/retrieval-sources.test.ts`).
+- [x] Support `pi-memory-os` session-start Fabric operational context via public `FabricStore.brief()`.
+- [x] Maintain compatibility coverage, including Icarus interop smoke.
 
-Implement `loadConfig(cwd = process.cwd())`:
+## Decisions
 
-- `fabricDir`: `process.env.FABRIC_DIR` if set; else existing `~/fabric`; else `~/.pi/fabric`.
-- `agent`: `FABRIC_AGENT` → `HERMES_AGENT_NAME` → `pi-agent`.
-- `projectId`: `FABRIC_PROJECT_ID` → cwd basename → `unknown`.
-- `compatMode`: `FABRIC_COMPAT_MODE || "icarus"`.
-- `autoStore`: default enabled unless `FABRIC_AUTO_STORE` is false-like.
+| Decision | Status | Notes |
+|---|---:|---|
+| Keep `pi-fabric` separate from `pi-memory-os` | accepted | Fabric tools/storage and Memory OS lifecycle glue have different ownership. |
+| Hermes/Icarus Fabric markdown is the compatibility target | accepted | Preserve field names, linking semantics, pending semantics, and hot/cold layout. |
+| Phase 1 avoids Hermes runtime writes | accepted | No Hermes `state.db`, telemetry, training, model-switching, Qdrant, or Redis ownership here. |
+| `pi-fabric` owns `fabric_*` tools | accepted | `pi-memory-os` may call APIs, but must not re-register tools. |
+| Programmatic API should be stable | accepted/done | Needed so `pi-memory-os` remains glue without importing built internals. |
 
-Do not read/write Hermes runtime files.
+## Done
 
-### 2. Types (`src/types.ts`)
+Implemented files:
 
-Define:
+- `src/config.ts` — Fabric config resolution.
+- `src/types.ts` — Icarus-compatible Fabric types.
+- `src/yaml.ts` — small frontmatter serializer/parser.
+- `src/fabric-store.ts` — filesystem storage, listing, search, pending, curate, recent, brief.
+- `src/scoring.ts` — phase-1 recall/scoring.
+- `src/hooks.ts` — Pi lifecycle hooks, fail-open.
+- `src/index.ts` — Pi extension entry and seven Fabric tools.
+- `tests/config.test.ts`, `tests/fabric-store.test.ts`, `tests/scoring.test.ts`, `tests/public-api.test.ts`.
 
-- `FabricEntryType = "task" | "decision" | "review" | "resolution" | "research" | "code-session" | "session" | "note"`.
-- `FabricStatus = "completed" | "open" | "blocked" | "superseded"`.
-- `TrainingValue = "high" | "normal" | "low"`.
-- `FabricFrontmatter` with DESIGN.md fields.
-- `FabricEntry = { frontmatter, body, file, path, cold }`.
-- Tool param/result types for the seven phase-1 tools.
+Already implemented behavior:
 
-Keep `tags?: string | string[]` and `artifact_paths?: string | string[]` accepted at the store boundary.
+- Resolve Fabric directory from `FABRIC_DIR`, Pi settings/global settings, existing `~/fabric`, or `~/.pi/fabric`.
+- Write Icarus-compatible markdown entries with 8-hex frontmatter `id`, independent 4-hex filename suffix, atomic `.tmp` rename, hot/cold support.
+- Validate entry types, open-task assignment, reviews, `agent:id` references, and training values.
+- Normalize `tags` and `artifact_paths` from string or array.
+- Search and recall hot/cold entries.
+- List pending tasks, reviews of current agent work, and customer-scoped open tickets.
+- Produce operational `brief()` with pending counts, recent own/other activity, and suggested next action.
+- Register phase-1 Fabric tools only in `pi-fabric`.
 
-### 3. YAML/frontmatter helpers (`src/yaml.ts`)
+## Reference Facts
 
-Use a deliberately small Icarus-compatible YAML subset:
+Verified against original Memory OS/Hermes/Icarus under `/home/tom/tmp/memory-os/icarus/`:
 
-- Writer:
-  - quote scalars with `JSON.stringify(String(value))`.
-  - write arrays as JSON arrays, valid YAML (`["a","b"]`).
-  - omit empty optional fields.
-- Parser:
-  - split first `---\n ... \n---` block.
-  - parse quoted strings, bare strings, booleans-as-strings where needed, and bracket arrays.
-  - normalize arrays; for scalar array fields, accept comma strings.
-- Preserve unknown body content exactly.
+- Icarus registers Fabric tools and lifecycle hooks in `__init__.py`.
+- Tool schemas use `fabric_recall.query`, `fabric_recall.max_results`, optional `agent`, optional `project`, and `fabric_write` comma-string-capable `tags` / `artifact_paths`.
+- `state.py` uses frontmatter `id = secrets.token_hex(4)`, filename suffix `secrets.token_hex(2)`, `<agent>-<type>-<slug>-<suffix>.md`, temp-file rename, hot/cold scanning, pending grouping, and curation by frontmatter id.
+- Pi supports `session_start`, `before_agent_start`, and `agent_end` hooks; hooks must fail open.
 
-Avoid a runtime dependency unless parser complexity grows.
+## Planned Work
 
-### 4. Store layer (`src/fabric-store.ts`)
+### 1. Stable Public Programmatic API
 
-Implement `FabricStore` as the single filesystem abstraction.
+Classification: `reuse/enabler`
+Status: complete
 
-Methods:
+Goal: let `pi-memory-os` consume Fabric behavior without importing built internals or duplicating markdown logic.
 
-- `ensureDirs()` creates root and `cold/`.
-- `initObsidian()` creates root, `cold/`, `daily/`, `.obsidian/` with minimal idempotent config.
-- `writeEntry(params)`:
-  - validate required `type`, `summary`, `content`.
-  - validate supported type.
-  - `status === "open"` requires `assigned_to`.
-  - `type === "review"` requires `review_of`.
-  - `review_of` / `revises` must match non-empty `agent:id` with id length at least 4; if local ref exists can be checked, reject missing local refs for compatibility with Icarus behavior.
-  - `training_value` must be `high|normal|low`.
-  - normalize tags/artifact paths from comma string or array and write YAML arrays.
-  - generate frontmatter `id` from `crypto.randomBytes(4).toString("hex")`.
-  - generate independent filename suffix from `crypto.randomBytes(2).toString("hex")`.
-  - slug from summary: lowercase, non-alnum to `-`, max 40, trim `-`.
-  - write `<target>.tmp`, then `rename()` to `.md`.
-  - default `platform: "pi"`, `tier: "hot"`, `source_tool: "pi-fabric"`.
-- `listEntries({ includeCold = true })` scans root `*.md` and optionally `cold/*.md`.
-- `hasEntryRef(ref)` searches root and `cold/` by frontmatter `agent` and `id`.
-- `search(query, limit = 10)` matches root and `cold/`, returning `{ query, count, results: [{ file, agent, summary, matches }] }`.
-- `pending({ customer_id? })` mirrors Icarus grouping:
-  - open tasks from other agents assigned to current agent.
-  - reviews from other agents whose `review_of` starts with current `agent:`.
-  - customer-scoped open tickets assigned to current agent.
-- `curate(entry_id, training_value)` searches root and `cold/`, rewrites frontmatter by `id`, and uses temp-file rename.
-- `recentOwn(limit)`, `recentOthers(limit)`, and `brief()` support `fabric_brief`.
+Tasks:
 
-### 5. Scoring (`src/scoring.ts`)
+- Export stable package-level or documented subpath APIs for:
+  - `loadConfig`
+  - `FabricStore`
+  - `recall` / scoring types
+  - public Fabric types needed by consumers
+- Ensure `brief()`, `pending()`, `recentOwn()`, and `recentOthers()` remain accessible through `FabricStore` or a small public helper.
+- Keep default extension/tool registration as the package default export.
+- Add a consumer-style test or typecheck that imports the public API the way `pi-memory-os` will.
+- Build package declarations so consumers have stable TypeScript types.
 
-Implement phase-1 filesystem retrieval without Hermes `state.db`:
+Verification:
 
-- Tokenize/lowercase query, summary, body, tags.
-- Score components:
-  - summary and body keyword/phrase matches.
-  - tag overlap.
-  - recency boost over 90 days.
-  - optional `agent` boost.
-  - optional `project` boost using `project_id`.
-  - small boosts for open assigned work and linked review/revision fields if easy.
-- Return sorted entries with DESIGN.md-compatible fields:
-  - `score`, `id`, `agent`, `type`, `timestamp`, `summary`, `file`, `path`.
-- Public tool parameter must remain `max_results`, not `limit`.
+- `npm run build` passes in `pi-fabric`.
+- `npm test` passes in `pi-fabric`.
+- `pi-memory-os` can replace `pi-fabric/dist/src/...` imports with the stable public API and pass `npm run verify` / `npm run build`.
 
-Document that this is a phase-1 simplification of `fabric-retrieve.py`.
+### 2. Support pi-memory-os Session-start Operational Context
 
-### 6. Pi extension entry (`src/index.ts`)
+Classification: `cross-repo/reuse`
+Status: complete
 
-Register exactly the phase-1 compatibility subset:
+Goal: provide enough stable API for `pi-memory-os` to recreate Icarus-style session-start Fabric context without direct markdown ownership.
 
-1. `fabric_write`
-2. `fabric_recall`
-3. `fabric_search`
-4. `fabric_pending`
-5. `fabric_curate`
-6. `fabric_brief`
-7. `fabric_init_obsidian`
+Tasks:
 
-Use TypeBox schemas. For `tags` and `artifact_paths`, expose a permissive schema that accepts either arrays or comma strings if TypeBox/JSON schema support permits; otherwise expose arrays in Pi and normalize strings defensively at runtime.
+- [x] Confirm `brief()` includes pending counts, first pending items, recent own/other activity, and suggested next action.
+- [x] Decide no new `pi-fabric` helper is needed yet: `pi-memory-os` can format/sanitize `FabricStore.brief()` output while `pi-fabric` owns the data.
+- [x] Keep sanitization/formatting boundaries clear: `pi-fabric` owns Fabric data; `pi-memory-os` owns final Memory OS injection policy.
 
-Return text JSON for compatibility and put raw objects in `details`.
+Verification:
 
-Do not register training/model tools in phase 1; mention them in README as future work.
+- [x] `pi-memory-os` session-start context calls `pi-fabric` public APIs only.
+- [x] No new `fabric_*` tools are registered by `pi-memory-os`.
+- [x] `pi-memory-os` unit tests cover success, fail-open Fabric brief errors, and sanitization.
 
-### 7. Hooks (`src/hooks.ts` or inside `index.ts`)
+### 3. Keep Fabric Compatibility Healthy
 
-Use only verified Pi hooks:
+Classification: `maintenance`
+Status: complete for phase 1; monitor for regressions
 
-- `session_start`:
-  - ensure status footer: `Fabric: linked` / `Fabric: not initialized` / pending count.
-  - do not write entries automatically.
-- `before_agent_start`:
-  - skip empty/social/system-like prompts.
-  - call `store.recall(prompt, { max_results: 3 })`.
-  - inject a `fabric-context` message if results exist.
-  - optionally include `fabric_brief` only on first turn of a session.
-  - sanitize retrieved content to strip unpaired backticks and obvious injection preambles.
-- `agent_end`:
-  - if `FABRIC_AUTO_STORE` enabled, inspect final assistant message.
-  - skip short/social/system-injection content.
-  - use Icarus-style regexes for decision/outcome/completion.
-  - write `type: "decision"`, `training_value: "high"`, `status: "completed"` when criteria are met.
-  - catch and ignore errors so Fabric cannot break Pi sessions.
+Tasks:
 
-Do not implement unverified hook names.
+- [x] Keep tests mapped to compatibility requirements:
+  - [x] write/parse frontmatter fields
+  - [x] pending grouping
+  - [x] `review_of`/`revises` validation
+  - [x] tags/artifact normalization
+  - [x] curation by frontmatter id
+  - [x] hot/cold search
+  - [x] recall with `max_results`, `agent`, `project`
+  - [x] idempotent Obsidian init, including `.obsidian/` and `daily/` directories
+  - [x] operational `brief()` shape for pending/recent/suggested action consumers
+- [x] Add manual Hermes/Icarus interop smoke: `npm run smoke:icarus-interop` writes with `FabricStore` under a temp Fabric dir and confirms original Icarus `parsing.parse_entry()` can parse/read it when `ICARUS_DIR` is available.
 
-### 8. Tests
+### 4. Future Non-phase-1 Work
 
-Use Node's built-in test runner or Vitest. Required test coverage must map to DESIGN.md §14:
+Do only after explicit design decision:
 
-1. Pi writes an entry and parsed frontmatter contains Icarus fields.
-2. Open assigned entry appears in `pending()` for that agent.
-3. `review_of=agent:id` accepts an existing entry and malformed refs are rejected.
-4. Comma-string and array `tags` both write YAML arrays; same for `artifact_paths`.
-5. `curate()` updates by frontmatter `id`, not filename suffix.
-6. `search()` scans both root and `cold/`.
-7. `recall()` accepts `max_results`, `agent`, and `project` names and returns compatible fields.
-8. `fabric_init_obsidian` can be called repeatedly without changing success.
+- Hermes telemetry/reporting tools.
+- Training/export/model replacement tools.
+- Hermes `state.db` writes.
+- Qdrant/Redis ownership.
+- Shared low-level clients with `pi-memory-os`.
 
-Add focused scoring tests for keyword, recency, agent, and project boosts.
+## Do-Not-Build List
 
-### 9. README
+Do not add these to `pi-fabric` phase 1:
 
-Document:
+- Qdrant or Redis clients.
+- Memory OS semantic ingestion.
+- `memory_os_*` tools.
+- Hermes `state.db` or telemetry writes.
+- Training/model-switching behavior.
+- A replacement Fabric runtime that diverges from Hermes/Icarus markdown compatibility.
 
-- What pi-fabric is and is not.
-- Compatibility with Hermes/Icarus shared markdown corpus.
-- Directory resolution order.
-- The seven phase-1 tools.
-- Env vars from DESIGN.md.
-- Installation/loading paths for Pi extensions.
-- Phase-1 limitations: no Hermes DB/telemetry writes, no Qdrant/Redis, no training/model replacement.
-- Manual interop test with `/tmp/shared-fabric-test`.
+## Current Next Step
 
-## Implementation order
+`pi-fabric` Tasks 1–3 are complete for the current phase. Next priority is cross-repo work in `pi-memory-os`: source-specific retrieval budgets / score policy. In `pi-fabric`, monitor for compatibility regressions and only add maintenance work when a concrete gap is discovered.
 
-1. Scaffold package/tsconfig/README skeleton.
-2. Implement config/types/yaml helpers.
-3. Implement `FabricStore.writeEntry`, parsing, listing, and `hasEntryRef`.
-4. Add tests for writes, tags/artifact normalization, refs.
-5. Implement search/pending/curate/brief and tests.
-6. Implement scoring/recall and tests.
-7. Wire tools in `index.ts`.
-8. Add lifecycle hooks after tool tests are green.
-9. Run full test/build and manual temp-dir smoke test.
-10. Optional Hermes interop: write with pi-fabric under `/tmp/shared-fabric-test`, then parse/read with Icarus reference code.
+Latest verification:
 
-## Risks and mitigations
-
-- **YAML edge cases:** keep emitted YAML simple and JSON-compatible; parser only needs the field subset emitted by Icarus/Pi.
-- **Reference validation strictness:** Icarus rejects missing local refs; preserve this for local refs, but document behavior if corpus is incomplete.
-- **Concurrent writes:** independent random suffix and atomic rename make create safe; curation uses temp-file rewrite.
-- **Prompt injection from recalled memory:** sanitize retrieved snippets before injection and avoid injecting raw full entries by default.
-- **Pi hook payload drift:** keep hooks small, optional, and fail-open; tools remain the core supported API.
+- `pi-fabric`: `npm test` passed (18 tests) after adding `revises`, `brief()`, and Obsidian directory coverage.
+- `pi-fabric`: `npm run smoke:icarus-interop` passed against `/home/tom/tmp/memory-os/icarus/parsing.py`.
+- `pi-memory-os`: `npm run verify` passed after session-start Fabric operational context changes (typecheck + 17 files / 108 tests).
+- `pi-memory-os`: `npm run smoke:lifecycle-context` passed and verified session_start Fabric brief plus before_agent_start dual-source context.
+- Code search found no remaining `pi-fabric/dist/src/...` imports under `pi-memory-os/src` or `pi-memory-os/tests`.

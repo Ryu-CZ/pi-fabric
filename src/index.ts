@@ -6,6 +6,25 @@ import { registerHooks } from "./hooks.js";
 import { recall } from "./scoring.js";
 import type { FabricWriteParams, TrainingValue } from "./types.js";
 
+export { loadConfig } from "./config.js";
+export { FabricStore } from "./fabric-store.js";
+export { recall, scoreEntry } from "./scoring.js";
+export { FABRIC_ENTRY_TYPES } from "./types.js";
+export type {
+  FabricConfig,
+  FabricEntry,
+  FabricEntryType,
+  FabricFrontmatter,
+  FabricRecallParams,
+  FabricSearchResult,
+  FabricStatus,
+  FabricWriteParams,
+  MaybeList,
+  PendingResult,
+  RecallResult,
+  TrainingValue,
+} from "./types.js";
+
 const TextOrArray = Type.Union([Type.String(), Type.Array(Type.String())]);
 const EntryType = Type.Union([Type.Literal("task"), Type.Literal("decision"), Type.Literal("review"), Type.Literal("resolution"), Type.Literal("research"), Type.Literal("code-session"), Type.Literal("session"), Type.Literal("note")]);
 const Training = Type.Union([Type.Literal("high"), Type.Literal("normal"), Type.Literal("low")]);

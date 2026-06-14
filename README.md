@@ -44,6 +44,17 @@ The extension registers exactly this Pi phase-1 compatibility subset:
 
 Training, model replacement, telemetry, report, and export tools are future work.
 
+## Programmatic API
+
+Consumers such as `pi-memory-os` should import the stable package root instead of built internals:
+
+```ts
+import fabricExtension, { FabricStore, loadConfig, recall } from "pi-fabric";
+import type { FabricConfig, FabricEntry, FabricRecallParams } from "pi-fabric";
+```
+
+The package root keeps the Pi extension as the default export and named-exports the supported Fabric config/store/recall API plus public Fabric types. `FabricStore` exposes `brief()`, `pending()`, `recentOwn()`, and `recentOthers()` for operational context.
+
 ## Environment variables
 
 - `FABRIC_DIR` — shared Fabric markdown directory
@@ -76,6 +87,14 @@ pi -e ./src/index.ts
 `fabric_recall` uses phase-1 filesystem scoring: keyword/phrase matches, tag overlap, recency, agent, project, and small status/link boosts. It intentionally does not write or depend on Hermes SQLite/FTS indexes.
 
 ## Manual interop smoke test
+
+When the original Icarus checkout is available at `/home/tom/tmp/memory-os/icarus` (or `ICARUS_DIR` points to it), run:
+
+```bash
+npm run smoke:icarus-interop
+```
+
+The smoke writes a temporary entry through `FabricStore` and asks Icarus `parsing.parse_entry()` to parse it. For a full manual Pi tool smoke:
 
 ```bash
 export FABRIC_DIR=/tmp/shared-fabric-test

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rename } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rename, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { FabricStore } from "../src/fabric-store.js";
@@ -42,6 +42,15 @@ test("review_of accepts existing refs and malformed/missing refs are rejected", 
   assert.equal(review.frontmatter.review_of, `pi-agent:${base.frontmatter.id}`);
   await assert.rejects(() => store.writeEntry({ type: "review", summary: "Bad", content: "bad", review_of: "not-a-ref" }), /review_of/);
   await assert.rejects(() => store.writeEntry({ type: "review", summary: "Missing", content: "bad", review_of: "pi-agent:abcd" }), /not found/);
+});
+
+test("revises accepts existing refs and malformed/missing refs are rejected", async () => {
+  const store = await makeStore("pi-agent");
+  const base = await store.writeEntry({ type: "decision", summary: "Original decision", content: "base" });
+  const revision = await store.writeEntry({ type: "decision", summary: "Updated decision", content: "revision", revises: `pi-agent:${base.frontmatter.id}` });
+  assert.equal(revision.frontmatter.revises, `pi-agent:${base.frontmatter.id}`);
+  await assert.rejects(() => store.writeEntry({ type: "decision", summary: "Bad revision", content: "bad", revises: "not-a-ref" }), /revises/);
+  await assert.rejects(() => store.writeEntry({ type: "decision", summary: "Missing revision", content: "bad", revises: "pi-agent:abcd" }), /not found/);
 });
 
 test("comma-string and array tags/artifact_paths write YAML arrays", async () => {
@@ -92,8 +101,35 @@ test("recall accepts max_results, agent, project and returns compatible fields",
   assert.ok("path" in result.results[0]);
 });
 
+test("brief includes pending counts, recent activity, and suggested next action", async () => {
+  const store = await makeStore("pi-agent");
+  await store.writeEntry({ agent: "other", type: "task", summary: "Do pending thing", content: "please", status: "open", assigned_to: "pi-agent" });
+  await store.writeEntry({ agent: "pi-agent", type: "note", summary: "Own recent note", content: "done" });
+  await store.writeEntry({ agent: "other", type: "note", summary: "Other recent note", content: "context" });
+
+  const pending = await store.pending();
+  const recentOwn = await store.recentOwn(1);
+  const brief = await store.brief();
+
+  assert.equal(brief.fabric_dir, store.config.fabricDir);
+  assert.equal(brief.agent, "pi-agent");
+  assert.deepEqual(brief.pending, {
+    open_tasks: 1,
+    reviews_of_my_work: 0,
+    open_tickets: 0,
+    total: 1,
+    first_items: [{ id: pending.open_tasks[0].frontmatter.id, summary: "Do pending thing", file: pending.open_tasks[0].file }],
+  });
+  assert.deepEqual(brief.recent_own, [{ id: recentOwn[0].frontmatter.id, type: "note", summary: "Own recent note", file: recentOwn[0].file }]);
+  assert.ok(Array.isArray(brief.recent_others));
+  assert.equal(brief.suggested_next_action, "Review pending Fabric work first.");
+});
+
 test("fabric_init_obsidian is idempotent", async () => {
   const store = await makeStore();
   assert.deepEqual(await store.initObsidian(), { ok: true, path: store.config.fabricDir });
   assert.deepEqual(await store.initObsidian(), { ok: true, path: store.config.fabricDir });
+  assert.ok((await stat(join(store.config.fabricDir, ".obsidian"))).isDirectory());
+  assert.ok((await stat(join(store.config.fabricDir, "daily"))).isDirectory());
+  await readFile(join(store.config.fabricDir, ".obsidian", "app.json"), "utf8");
 });
